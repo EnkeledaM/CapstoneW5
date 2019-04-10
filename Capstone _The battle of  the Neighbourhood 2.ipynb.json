@@ -1,0 +1,834 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": true
+   },
+   "source": [
+    "# Capstone Project - The Battle of Neighborhoods 2"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "\n",
+    "## Applied Data Science Capstone - IBM/Coursera"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Table of Contents\n",
+    "\n",
+    "1. <a href=\"#item1\">Introduction: Business Problem</a>\n",
+    "2. <a href=\"#item2\">Data</a>  \n",
+    "3. <a href=\"#item3\">Methodology</a> \n",
+    "4. <a href=\"#item3\">Analysis</a>\n",
+    "5. <a href=\"#item4\">Results and Discussion</a>  \n",
+    "6. <a href=\"#item5\">Conclusion</a>  "
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Introduction: Business Problem"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "A real estate development and investment company is trying to identify and shortlist retail opportunities in the Greater Toronto area based on trends and popularity.\n",
+    "\n",
+    "The company realizes the importance and relevance of social media in understanding the pulse of the market and seeks to use data as a key driver in decision making.\n",
+    "\n",
+    "How can the company use social trends to select popular venues, understand and identify characteristics of the venues, and select new locations with similar characteristics which would have high growth potential?\n",
+    "In this study, as a Data Scientist, I provide a point of view of how data can be acquired, cleansed, curated and analyzed through machine learning technique to better drive the decision-making process.\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    " # Data"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "\n",
+    "To drive the understanding and analysis in this data science project, I have used the following data sets:\n",
+    "\n",
+    "1-Toronto neighborhoods data from https://en.wikipedia.org/wiki/List_of_postal_codes_of_Canada:_M , which was also used in the week 3 assignment. This data set includes the Postal Codes, Boroughs and Neighborhood in the Toronto area starting with the letter M.\n",
+    "\n",
+    "2-The above data set was augmented with geo codes for each postal code from the data set provided by Cognitive Class at http://cocl.us/Geospatial_data. Upon merging the data sets, the resulting data set included geo coordinates, i.e. latitude and longitude, for each postal code.\n",
+    "\n",
+    "3-Foursquare Places API for Venues – Foursquare provides various Regular and Premium API endpoints. Regular endpoints include basic venue firmographic data, category, and ID. Premium endpoints include rich content such as ratings, URLs, photos, tips, menus, etc. For the analysis, I have used the “explore” Regular API endpoint to get venue recommendations via https://developer.foursquare.com/docs/venues/explore.\n",
+    "\n",
+    "The data sets used were already curated and did not require any additionally preparation such as reformatting. The only preparation steps were merging and reshaping of the data frames during the analysis.\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Methodology"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Neighborhood Candidate Selection"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Fetching package metadata .............\n",
+      "Solving package specifications: "
+     ]
+    }
+   ],
+   "source": [
+    "# Import required libraries\n",
+    "!conda install -c conda-forge folium=0.5.0 --yes\n",
+    "import folium\n",
+    "print('Folium installed and imported!')\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import numpy as np  # useful for many scientific computing in Python\n",
+    "import pandas as pd # primary data structure library\n",
+    "import requests\n",
+    "from geopy.geocoders import Nominatim\n",
+    "import matplotlib.cm as cm\n",
+    "import matplotlib.colors as colors\n",
+    "import matplotlib.pyplot as plt\n",
+    "import folium\n",
+    "from sklearn.cluster import KMeans\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Fetch the neighborhood data from Wikipedia and read it into a DataFrame. Next filter and transform records per specifications."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Read HTML content\n",
+    "df = pd.read_html('https://en.wikipedia.org/wiki/List_of_postal_codes_of_Canada:_M')[0][1:]\n",
+    "\n",
+    "# Rename columns\n",
+    "df.rename(columns={0:'PostalCode',1:'Borough',2:'Neighborhood'},inplace=True)\n",
+    "\n",
+    "# Filter dataframe: drop rows with Borough as 'Not assigned'\n",
+    "df.drop(df[df.Borough == 'Not assigned'].index, inplace=True)\n",
+    "\n",
+    "# Combine neigborhoods that have the same PostalCode and Borough\n",
+    "gdf = df.groupby(['PostalCode','Borough']).agg(lambda col: ', '.join(col)).reset_index()\n",
+    "\n",
+    "# Assign Borough value to Neighborhood that are 'Not assigned'\n",
+    "gdf.Neighborhood = gdf.Borough.where(gdf.Neighborhood == 'Not assigned',gdf.Neighborhood)\n",
+    "\n",
+    "print('Total number of Neighborhoods: {}'.format(gdf.shape[0]))\n",
+    "gdf.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Fetch geocode file and read it into a DataFrame."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "geocodes = pd.read_csv('http://cocl.us/Geospatial_data')\n",
+    "geocodes.rename(columns={'Postal Code': 'PostalCode'},inplace=True)\n",
+    "print('Total Geo Code entries: {}'.format(geocodes.shape[0]))\n",
+    "geocodes.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Merge the neighborhood and geocode DataFrames."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [],
+   "source": [
+    "neighborhoods = gdf.merge(geocodes, how='left', on=['PostalCode'])\n",
+    "print('The dataframe has {} Boroughs and {} Neighborhoods.'.format(\n",
+    "        len(neighborhoods['Borough'].unique()),\n",
+    "        neighborhoods.shape[0]\n",
+    "    )\n",
+    ")\n",
+    "neighborhoods.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualize the neighborhoods as markers overlaid in a map of Toronto created using Folium."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# create map of city using latitude and longitude values\n",
+    "map_city = folium.Map(location=[latitude, longitude], zoom_start=10)\n",
+    "\n",
+    "# add markers to map\n",
+    "for lat, lng, borough, neighborhood in zip(neighborhoods['Latitude'], \n",
+    "                                           neighborhoods['Longitude'], \n",
+    "                                           neighborhoods['Borough'], \n",
+    "                                           neighborhoods['Neighborhood']):\n",
+    "    label = '{}, {}'.format(neighborhood, borough)\n",
+    "    label = folium.Popup(label, parse_html=True)\n",
+    "    folium.CircleMarker(\n",
+    "        [lat, lng],\n",
+    "        radius=5,\n",
+    "        popup=label,\n",
+    "        color='blue',\n",
+    "        fill=True,\n",
+    "        fill_color='#3186cc',\n",
+    "        fill_opacity=0.7,\n",
+    "        parse_html=False).add_to(map_city)  \n",
+    "map_city"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Fetch venue data from Foursquare for each neighborhood using the “explore” API endpoint. Aggregate the data in"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Set Foursquare credentials and version\n",
+    "CLIENT_ID = 'OIJJKMXL2BGR44AP1EFFIGVDGUAL1FDUCNTYHNSI0CSS22NC' # your Foursquare ID\n",
+    "CLIENT_SECRET = 'OIJJKMXL2BGR44AP1EFFIGVDGUAL1FDUCNTYHNSI0CSS22NC' # your Foursquare Secret\n",
+    "VERSION = '20180605' # Foursquare API version\n",
+    "print('Your credentails:')\n",
+    "print('CLIENT_ID: ' + CLIENT_ID)\n",
+    "print('CLIENT_SECRET:' + CLIENT_SECRET)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create function to pull venues for a neighborhood using the \"explore\" API endpoint\n",
+    "def getNearbyVenues(names, latitudes, longitudes, radius=500, LIMIT=50):\n",
+    "    venues_list=[]\n",
+    "    for name, lat, lng in zip(names, latitudes, longitudes):\n",
+    "        # create the API request URL\n",
+    "        url = 'https://api.foursquare.com/v2/venues/explore?&client_id={}&client_secret={}&v={}&ll={},{}&radius={}&limit={}'.format(\n",
+    "            CLIENT_ID, \n",
+    "            CLIENT_SECRET, \n",
+    "            VERSION, \n",
+    "            lat, \n",
+    "            lng, \n",
+    "            radius, \n",
+    "            LIMIT)\n",
+    "            \n",
+    "        # make the GET request\n",
+    "        results = requests.get(url).json()[\"response\"]['groups'][0]['items']\n",
+    "        \n",
+    "        # return only relevant information for each nearby venue\n",
+    "        venues_list.append([(\n",
+    "            name, \n",
+    "            lat, \n",
+    "            lng, \n",
+    "            v['venue']['id'], \n",
+    "            v['venue']['name'], \n",
+    "            v['venue']['location']['lat'], \n",
+    "            v['venue']['location']['lng'],  \n",
+    "            v['venue']['categories'][0]['name']) for v in results])\n",
+    "\n",
+    "    nearby_venues = pd.DataFrame([item for venue_list in venues_list for item in venue_list])\n",
+    "    nearby_venues.columns = ['Neighborhood', \n",
+    "                  'Neighborhood Latitude', \n",
+    "                  'Neighborhood Longitude', \n",
+    "                  'Venue ID',               \n",
+    "                  'Venue', \n",
+    "                  'Venue Latitude', \n",
+    "                  'Venue Longitude', \n",
+    "                  'Venue Category']\n",
+    "    \n",
+    "    return(nearby_venues)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Execute the function to get the list of venues for each neighborhood.\n",
+    "# Aggregate the data into the city_venues DataFrame\n",
+    "city_venues = getNearbyVenues(names=neighborhoods['Neighborhood'],\n",
+    "                                 latitudes=neighborhoods['Latitude'],\n",
+    "                                 longitudes=neighborhoods['Longitude']\n",
+    "                                )\n",
+    "city_venues.sort_values(by=['Neighborhood'],inplace=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# OPTIONAL\n",
+    "# Export to CSV file\n",
+    "city_venues.to_csv('city_top_venues.csv')\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# OPTIONAL\n",
+    "# Read from CSV file\n",
+    "city_venues = pd.read_csv('city_top_venues.csv',index_col=0)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Print venue and neighborhood record counts\n",
+    "print('Pulled {} venues in {} neighborhoods.'.format(\n",
+    "    city_venues.shape[0],\n",
+    "    len(city_venues['Neighborhood'].unique())\n",
+    "))\n",
+    "\n",
+    "city_venues.head()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Exploratory Data Analysis"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Generate statistics from the venue data such as: a) Venue counts by neighborhood b) Top 20 neighborhoods by venue count\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Group venues by neighborhood, aggregate and sort by venue count\n",
+    "grouped = city_venues.groupby('Neighborhood').size().reset_index(name='Venue Count by Neighborhood').sort_values(by='Venue Count by Neighborhood',ascending=False)\n",
+    "print('Neighborhood Count: {}'.format(neighborhoods.shape[0]))\n",
+    "print('Venue Count: {}'.format(city_venues.shape[0]))\n",
+    "print('Neighborhoods with venues: {}'.format(len(city_venues['Neighborhood'].unique())))\n",
+    "grouped.describe()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "top_neighborhoods = pd.DataFrame(grouped['Neighborhood'][0:20])\n",
+    "top_neighborhoods.set_index('Neighborhood',inplace=True)\n",
+    "top_neighborhoods.head(20)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualize the venue data by plotting the number of neighborhoods for each venue count and range of venue counts\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Plot number of Neighborhoods for each Venue Count\n",
+    "vc='Venue Count by Neighborhood'\n",
+    "nc='# of Neighborhoods'\n",
+    "counted = grouped.groupby(vc).size().reset_index(name=nc).sort_values(by=vc,ascending=True)\n",
+    "ax = counted.plot(kind='bar', x=vc, y=nc, legend=False)\n",
+    "ax.spines['top'].set_visible(False)\n",
+    "ax.spines['right'].set_visible(False)\n",
+    "plt.title('# of Neighborhoods for each Venue Count')\n",
+    "plt.xlabel('Venue Count')\n",
+    "plt.ylabel(nc)\n",
+    "plt.yticks([])\n",
+    "for p in ax.patches:\n",
+    "    ax.annotate(\"%i\" % p.get_height(), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 10), textcoords='offset points')\n",
+    "plt.show()\n",
+    "\n",
+    "# Plot number of Neighborhoods for Venue Count range\n",
+    "bins=np.arange(0,60,10)\n",
+    "vc_ranged = counted.rename(columns={vc:'VCR'}).groupby(pd.cut(counted[vc],bins)).sum().drop(columns='VCR').reset_index()\n",
+    "ax = vc_ranged.plot(kind='bar', x=vc, y=nc, legend=False)\n",
+    "ax.spines['top'].set_visible(False)\n",
+    "ax.spines['right'].set_visible(False)\n",
+    "plt.title('# of Neighborhoods for Venue Count Range')\n",
+    "plt.xlabel('Venue Count Range')\n",
+    "plt.ylabel(nc)\n",
+    "plt.yticks([])\n",
+    "for p in ax.patches:\n",
+    "    ax.annotate(\"%i\" % p.get_height(), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 10), textcoords='offset points')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualize the top 10 categories across the entire set of venues (all neighborhoods) and as well as the top 20 neighborhoods.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "\n",
+    "print('There are {} uniques categories.'.format(len(city_venues['Venue Category'].unique())))\n",
+    "\n",
+    "top_categories_all = city_venues.groupby('Venue Category').size().reset_index(name='count').sort_values(by='count', ascending=False).reset_index(drop=True)[0:10]\n",
+    "vc='Venue Category'\n",
+    "nv='count'\n",
+    "ax = top_categories_all.plot(kind='bar', x=vc, y=nv, legend=False)\n",
+    "ax.spines['top'].set_visible(False)\n",
+    "ax.spines['right'].set_visible(False)\n",
+    "plt.title('# of Venues by Category across all Neighborhoods')\n",
+    "plt.xlabel('Category')\n",
+    "plt.ylabel('# of Venues')\n",
+    "plt.yticks([])\n",
+    "for p in ax.patches:\n",
+    "    ax.annotate(\"%i\" % p.get_height(), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 10), textcoords='offset points')\n",
+    "plt.show()\n",
+    "\n",
+    "top_categories_top_neighborhoods = city_venues.join(top_neighborhoods,on='Neighborhood',how='inner').groupby('Venue Category').size().reset_index(name='count').sort_values(by='count', ascending=False).reset_index(drop=True)[0:10]\n",
+    "ax = top_categories_top_neighborhoods.plot(kind='bar', x=vc, y=nv, legend=False)\n",
+    "ax.spines['top'].set_visible(False)\n",
+    "ax.spines['right'].set_visible(False)\n",
+    "plt.title('# of Venues by Category across top 20 Neighborhoods')\n",
+    "plt.xlabel('Category')\n",
+    "plt.ylabel('# of Venues')\n",
+    "plt.yticks([])\n",
+    "for p in ax.patches:\n",
+    "    ax.annotate(\"%i\" % p.get_height(), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 10), textcoords='offset points')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "One hot encode the data.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [],
+   "source": [
+    "# one hot encoding\n",
+    "city_onehot = pd.get_dummies(city_venues[['Venue Category']], prefix=\"\", prefix_sep=\"\")\n",
+    "\n",
+    "# add neighborhood column back to dataframe\n",
+    "city_onehot['Neighborhood'] = city_venues['Neighborhood'] \n",
+    "\n",
+    "# move neighborhood column to the first column\n",
+    "fixed_columns = [city_onehot.columns[-1]] + list(city_onehot.columns[:-1])\n",
+    "city_onehot = city_onehot[fixed_columns]\n",
+    "\n",
+    "print('Dimensions of one hot encoded dataframe: {}'.format(city_onehot.shape))\n",
+    "\n",
+    "city_grouped = city_onehot.groupby('Neighborhood').mean().reset_index()\n",
+    "\n",
+    "print('Dimensions of one hot encoded dataframe grouped by Neighborhood: {}'.format(city_grouped.shape))\n",
+    "Dimensions of one hot encoded dataframe: (1692, 255)\n",
+    "Dimensions of one hot encoded dataframe grouped by Neighborhood: (99, 255)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Print each neighborhood along with its respective top 5 most common venues (category) by frequency.\n",
+    "num_top_venues = 5\n",
+    "\n",
+    "for hood in city_grouped['Neighborhood']:\n",
+    "    print(\"----\"+hood+\"----\")\n",
+    "    temp = city_grouped[city_grouped['Neighborhood'] == hood].T.reset_index()\n",
+    "    temp.columns = ['venue','freq']\n",
+    "    temp = temp.iloc[1:]\n",
+    "    temp['freq'] = temp['freq'].astype(float)\n",
+    "    temp = temp.round({'freq': 2})\n",
+    "    print(temp.sort_values('freq', ascending=False).reset_index(drop=True).head(num_top_venues))\n",
+    "    print('\\n')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Create a DataFrame containing the top 10 venues by neighborhood based on the one hot encoded data and visualize the data.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create a function to sort the venues in descending order.\n",
+    "def return_most_common_venues(row, num_top_venues):\n",
+    "    row_categories = row.iloc[1:]\n",
+    "    row_categories_sorted = row_categories.sort_values(ascending=False)\n",
+    "    \n",
+    "    return row_categories_sorted.index.values[0:num_top_venues]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Call the function to populate the DataFrame with top 10 venues for each neighborhood\n",
+    "num_top_venues = 10\n",
+    "\n",
+    "indicators = ['st', 'nd', 'rd']\n",
+    "\n",
+    "# create columns according to number of top venues\n",
+    "columns = ['Neighborhood']\n",
+    "for ind in np.arange(num_top_venues):\n",
+    "    try:\n",
+    "        columns.append('{}{} Most Common Venue'.format(ind+1, indicators[ind]))\n",
+    "    except:\n",
+    "        columns.append('{}th Most Common Venue'.format(ind+1))\n",
+    "\n",
+    "# create a new dataframe\n",
+    "neighborhoods_venues_sorted = pd.DataFrame(columns=columns)\n",
+    "neighborhoods_venues_sorted['Neighborhood'] = city_grouped['Neighborhood']\n",
+    "\n",
+    "for ind in np.arange(city_grouped.shape[0]):\n",
+    "    neighborhoods_venues_sorted.iloc[ind, 1:] = return_most_common_venues(city_grouped.iloc[ind, :], num_top_venues)\n",
+    "\n",
+    "neighborhoods_venues_sorted.head()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(\"1st Most Common Venue: {}\".format(neighborhoods_venues_sorted['1st Most Common Venue'].describe().top))\n",
+    "print(\"2nd Most Common Venue: {}\".format(neighborhoods_venues_sorted['2nd Most Common Venue'].describe().top))\n",
+    "print(\"3rd Most Common Venue: {}\".format(neighborhoods_venues_sorted['3rd Most Common Venue'].describe().top))\n",
+    "print(\"4th Most Common Venue: {}\".format(neighborhoods_venues_sorted['4th Most Common Venue'].describe().top))\n",
+    "print(\"5th Most Common Venue: {}\".format(neighborhoods_venues_sorted['5th Most Common Venue'].describe().top))\n",
+    "print(\"6th Most Common Venue: {}\".format(neighborhoods_venues_sorted['6th Most Common Venue'].describe().top))\n",
+    "print(\"7th Most Common Venue: {}\".format(neighborhoods_venues_sorted['7th Most Common Venue'].describe().top))\n",
+    "print(\"8th Most Common Venue: {}\".format(neighborhoods_venues_sorted['8th Most Common Venue'].describe().top))\n",
+    "print(\"9th Most Common Venue: {}\".format(neighborhoods_venues_sorted['9th Most Common Venue'].describe().top))\n",
+    "print(\"10th Most Common Venue: {}\".format(neighborhoods_venues_sorted['10th Most Common Venue'].describe().top))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Analysis (Machine Learning)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Based on the data available for neighborhoods and venues, we can define venue categories as features for machine learning. Given there are approximately 166 categories across a data set of 99 neighborhoods, use of k-means clustering to cluster the neighborhoods sounds like a reasonable approach. The 166 categories naturally map to features used in the k-means model. An initial value of ‘k’ was set to 7 [square root of 49.5 (99 divided by 2)]. This generates the cluster labels for each of the neighborhoods."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# set number of clusters\n",
+    "kclusters = 7\n",
+    "\n",
+    "city_grouped_clustering = city_grouped.drop('Neighborhood', 1)\n",
+    "\n",
+    "# run k-means clustering\n",
+    "kmeans = KMeans(n_clusters=kclusters, random_state=0).fit(city_grouped_clustering)\n",
+    "\n",
+    "# check cluster labels generated for each row in the dataframe\n",
+    "kmeans.labels_[0:10]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# add clustering labels\n",
+    "neighborhoods_venues_sorted.insert(0, 'Cluster Labels', kmeans.labels_)\n",
+    "\n",
+    "city_merged = neighborhoods\n",
+    "\n",
+    "# merge toronto_grouped with toronto_data to add latitude/longitude for each neighborhood\n",
+    "city_merged = city_merged.join(neighborhoods_venues_sorted.set_index('Neighborhood'), on='Neighborhood')\n",
+    "\n",
+    "# drop rows with no assigned clusters\n",
+    "city_merged.dropna(inplace=True)\n",
+    "\n",
+    "city_merged.head() # check the last columns!"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "Visualize the resulting clusters on a map of Toronto using Folium.\n",
+    "In [24]:\n",
+    "# create map\n",
+    "map_clusters = folium.Map(location=[latitude, longitude], zoom_start=11)\n",
+    "\n",
+    "# set color scheme for the clusters\n",
+    "x = np.arange(kclusters)\n",
+    "ys = [i + x + (i*x)**2 for i in range(kclusters)]\n",
+    "colors_array = cm.rainbow(np.linspace(0, 1, len(ys)))\n",
+    "rainbow = [colors.rgb2hex(i) for i in colors_array]\n",
+    "\n",
+    "# add markers to the map\n",
+    "markers_colors = []\n",
+    "for lat, lon, poi, cluster in zip(city_merged['Latitude'], city_merged['Longitude'], city_merged['Neighborhood'], city_merged['Cluster Labels']):\n",
+    "    label = folium.Popup(str(poi) + ' Cluster ' + str(cluster), parse_html=True)\n",
+    "    cluster = int(cluster)\n",
+    "    folium.CircleMarker(\n",
+    "        [lat, lon],\n",
+    "        radius=5,\n",
+    "        popup=label,\n",
+    "        color=rainbow[cluster-1],\n",
+    "        fill=True,\n",
+    "        fill_color=rainbow[cluster-1],\n",
+    "        fill_opacity=0.7).add_to(map_clusters)\n",
+    "       \n",
+    "map_clusters\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Results\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "In this section we examine the clusters and view cluster specific details.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Plot the distribution of neighborhoods across clusters\n",
+    "cn = city_merged.groupby('Cluster Labels').size().reset_index(name='# of Neighborhoods')\n",
+    "ax = cn.plot(kind='bar', x='Cluster Labels', y='# of Neighborhoods', legend=False)\n",
+    "ax.spines['top'].set_visible(False)\n",
+    "ax.spines['right'].set_visible(False)\n",
+    "plt.title('Distribution of Neighborhoods by cluster')\n",
+    "plt.xlabel('Cluster')\n",
+    "plt.ylabel('# of Neighborhoods')\n",
+    "plt.yticks([])\n",
+    "for p in ax.patches:\n",
+    "    ax.annotate(\"%i\" % p.get_height(), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 10), textcoords='offset points')\n",
+    "plt.show()\n",
+    "\n",
+    "# Plot the distribution of venues across clusters\n",
+    "cv = city_venues.merge(city_merged, on='Neighborhood')[['Venue','Cluster Labels']].groupby('Cluster Labels').size().reset_index(name='# of Venues')\n",
+    "ax = cv.plot(kind='bar', x='Cluster Labels', y='# of Venues', legend=False)\n",
+    "ax.spines['top'].set_visible(False)\n",
+    "ax.spines['right'].set_visible(False)\n",
+    "plt.title('Distribution of Venues by cluster')\n",
+    "plt.xlabel('Cluster')\n",
+    "plt.ylabel('# of Venues')\n",
+    "plt.yticks([])\n",
+    "for p in ax.patches:\n",
+    "    ax.annotate(\"%i\" % p.get_height(), (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 10), textcoords='offset points')\n",
+    "plt.show()\n",
+    "\n",
+    "# Display most common venue category in each cluster\n",
+    "city_venues.merge(city_merged, on='Neighborhood')[['Cluster Labels','Venue Category']].groupby(['Cluster Labels','Venue Category']).size().reset_index(name='Count').sort_values(by=['Cluster Labels','Count'],ascending=[True,False]).groupby(['Cluster Labels']).head(1)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "The plots above present the distribution of entire set of neighborhoods (99) and venues (1692) across 7 clusters. Each cluster includes neighborhoods that have commonality based on the feature set which equates to the categories of the venues in the neighborhood. A key point to notice is the uneven distribution of the neighborhoods and venues across the clusters indicating the similarity or cohesiveness in the clusters 5 and 6.\n",
+    "\n",
+    "Next, we look at the most common venue in each cluster. Coffee Shops and Fast Food Restaurants are the most common venues in clusters 5 and 6 respectively.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "city_merged.loc[city_merged['Cluster Labels'] == 0, city_merged.columns[[1] + [2] + list(range(5, city_merged.shape[1]))]]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Cluster 6 is the second largest cluster with 34 neighborhoods and includes 439 venues. Like cluster 5, it covers most of the boroughs. The most common venues is Fast Food Restaurant. Apart from restaurants, this cluster includes a wide range of retails outlets."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Discussion"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "I observed the following during the analysis of the results:\n",
+    "\n",
+    "Predominance of 2 clusters across the neighborhoods and venue categories which indicates similarity or commonality of features. The remaining 4 clusters had more distinguishing or unique features.\n",
+    "\n",
+    "The k-means clustering approach relied of frequency of a category across the 255 unique categories. The feature set may be large compared to the number of samples, i.e. number of neighborhoods (99).\n",
+    "\n",
+    "I tried multiple values of k in the k-means clustering. For lower values of k, the larger clusters coalesced into a single cluster. For higher values of k, the number of smaller clusters increased but the larger clusters did not break up noticeably any further.\n",
+    "\n",
+    "The Foursquare data is primarily social and is crowdsourced. I noticed the API calls returned slightly different data sets when executed at various times of the day or day of the week.\n",
+    "\n",
+    "Based on the results, I have the following recommendations:\n",
+    "\n",
+    "I had planned initially to use the Premium Endpoint to fetch ratings but was unable to because of the daily limits of API calls. This extended data could have provided a social dimension, but the data would change frequently.\n",
+    "\n",
+    "Running the analysis and comparing results over a period as opposed to a snapshot would stabilize the findings.\n",
+    "Consider other unsupervised learning methods for comparative analysis.\n",
+    "Augment demographic data for neighborhoods to get additional insights.\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Conclusion\n",
+    "\n",
+    "In conclusion, this study was a positive step for the stakeholders to understand how data from various sources can be used via powerful tools and visualization techniques to derive insights.\n",
+    "\n",
+    "From a personal perspective, it provided me with exposure to the data science methodology from a business problem, analysis, data acquisition, preparation, feature selection, model creation, train/fit and test/analyze results. The libraries for data acquisition, preparation, and visualization demonstrated the value of data science."
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3.5",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.5.5"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 1
+}
